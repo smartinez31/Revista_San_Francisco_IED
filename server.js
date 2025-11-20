@@ -416,18 +416,20 @@ app.get('/manifest.json', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'manifest.json'));
 });
 
-// ==========================
-// INICIAR SERVIDOR
-// ==========================
+// =============================================================================
+// RUTA SPA - DEBE IR *ANTES* DE app.listen y AL FINAL DE LAS RUTAS
+// =============================================================================
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// =============================================================================
+// INICIAR SERVIDOR - SIEMPRE AL FINAL
+// =============================================================================
 app.listen(PORT, '0.0.0.0', () => {
     console.log('='.repeat(60));
     console.log('🚀 REVISTA DIGITAL CSF - SERVIDOR EN EJECUCIÓN');
     console.log('📌 Puerto:', PORT);
     console.log('📌 Environment:', process.env.NODE_ENV);
     console.log('='.repeat(60));
-});
-
-// Ruta SPA - SIEMPRE AL FINAL
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
