@@ -1,3 +1,15 @@
+// server.js - VERSIÓN CORREGIDA Y OPTIMIZADA
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
+const { query } = require('./database');
+const { initializeDatabase } = require('./init-db');
+
+const app = express();
+const PORT = process.env.PORT || 10000;
+
 // =============================================================================
 // CREAR CARPETA PUBLIC SI NO EXISTE - SOLUCIÓN TEMPORAL
 // =============================================================================
@@ -22,17 +34,6 @@ if (!fs.existsSync(publicDir)) {
     fs.writeFileSync(path.join(publicDir, 'index.html'), basicHTML);
     console.log('📄 index.html temporal creado');
 }
-// server.js - VERSIÓN CORREGIDA Y OPTIMIZADA
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const fs = require('fs');
-const { query } = require('./database');
-const { initializeDatabase } = require('./init-db');
-
-const app = express();
-const PORT = process.env.PORT || 10000;
 
 // ==========================
 // CONFIGURACIÓN
@@ -45,6 +46,8 @@ const allowedOrigins = [
     'http://localhost:3000',
     'http://127.0.0.1:3000'
 ];
+
+// ... el resto de tu código IGUAL como lo tienes
 
 // ✅ FUNCIÓN PARA GUARDAR IMÁGENES BASE64
 async function saveBase64Image(base64Data, title) {
