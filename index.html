@@ -15,7 +15,7 @@
     <meta name="mobile-web-app-capable" content="yes">
 
     <!-- Manifest sin referencias a iconos faltantes -->
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="./manifest.json">
 
 
     <!-- Service Worker Registration Simplificado -->
@@ -23,7 +23,7 @@
 <script>
     if ('serviceWorker' in navigator) {  // ✅ CORREGIDO: navigator
         window.addEventListener('load', function() {
-            navigator.serviceWorker.register('/sw.js')  // ✅ CORREGIDO
+            navigator.serviceWorker.register('.sw.js')  // ✅ CORREGIDO
                 .then(function(registration) {
                     console.log('✅ ServiceWorker registrado: ', registration.scope);
                 })
