@@ -22,6 +22,12 @@ const allowedOrigins = [
     'http://127.0.0.1:3000'
 ];
 
+// ✅ SERVIR ARCHIVOS ESTÁTICOS PARA IMÁGENES
+app.use('/images', express.static(path.join(__dirname, 'public', 'images')));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ... resto de la configuración
+
 // ✅ FUNCIÓN PARA GUARDAR IMÁGENES BASE64
 async function saveBase64Image(base64Data, title) {
     try {
