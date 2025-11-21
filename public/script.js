@@ -8,23 +8,30 @@ const state = {
 };
 
 // Configuración automática de API URL para producción
+// Configuración automática de API URL para desarrollo local
 function getApiBaseUrl() {
     const currentUrl = window.location.origin;
+    
+    console.log('🌐 URL actual del frontend:', currentUrl);
+    
+    // Si estamos en el servidor de desarrollo (5500), usar localhost:10000
+    if (currentUrl.includes('127.0.0.1:5500') || currentUrl.includes('localhost:5500')) {
+        return 'http://localhost:10000/api';
+    }
     
     if (currentUrl.includes('onrender.com')) {
         return currentUrl + '/api';
     }
     
-    // Desarrollo local - USAR EL NUEVO PUERTO
-    return 'http://localhost:10000/api';  // Mismo puerto que server.js
+    // Desarrollo local por defecto
+    return 'http://localhost:10000/api';
 }
+
 const API_BASE_URL = getApiBaseUrl();
 console.log('🔗 Conectando a API:', API_BASE_URL);
 
-// EN script.js - AL INICIO, después de API_BASE_URL
-// ⭐⭐ CORREGIR ESTO - VERSIÓN MEJORADA ⭐⭐
-const IMAGE_BASE_URL = 'http://localhost:10000'; // SIEMPRE usar el puerto del backend
-
+// ⭐⭐ CORREGIR Image Base URL también ⭐⭐
+const IMAGE_BASE_URL = API_BASE_URL.replace('/api', '');
 console.log('🌐 Image Base URL:', IMAGE_BASE_URL);
 
 // Función mejorada para llamadas a la API
@@ -113,10 +120,17 @@ document.addEventListener('click', function(e) {
     }
 });
 
-// Cargar datos iniciales desde la API
-// En la función loadInitialData() o donde cargas artículos
+
+// ⭐⭐ MEJORAR loadInitialData() - CON CONTROL DE EJECUCIÓN ⭐⭐
 async function loadInitialData() {
+    // ⭐⭐ EVITAR LLAMADAS DUPLICADAS ⭐⭐
+    if (window.loadingInitialData) {
+        console.log('⏳ [LOADING] Carga de datos iniciales en curso...');
+        return;
+    }
+    
     try {
+        window.loadingInitialData = true;
         console.log('🔄 [FRONTEND] Cargando datos desde la API...');
         
         // Cargar artículos desde la API
@@ -126,6 +140,24 @@ async function loadInitialData() {
         // Actualizar el estado con los datos de la API
         state.articles = articlesData.articles || [];
         
+        // ⭐⭐ CARGAR COMENTARIOS PARA CADA ARTÍCULO ⭐⭐
+        console.log('💬 [FRONTEND] Cargando comentarios para cada artículo...');
+        let totalComments = 0;
+        
+        for (let article of state.articles) {
+            try {
+                const commentsData = await apiRequest(`/articles/${article.id}/comments`);
+                if (commentsData.success) {
+                    article.comments = commentsData.comments || [];
+                    totalComments += article.comments.length;
+                }
+            } catch (error) {
+                console.warn(`⚠️ Error cargando comentarios para artículo ${article.id}:`, error);
+                article.comments = [];
+            }
+        }
+        
+        console.log(`💬 [FRONTEND] Total de comentarios cargados: ${totalComments}`);
         console.log('💾 [FRONTEND] Artículos en estado:', state.articles.length);
         
         // Guardar en localStorage como backup
@@ -134,6 +166,8 @@ async function loadInitialData() {
     } catch (error) {
         console.log('📱 [FRONTEND] Modo offline - Usando datos locales');
         loadDataFromStorage();
+    } finally {
+        window.loadingInitialData = false;
     }
 }
 
@@ -550,38 +584,20 @@ function renderFilteredArticles(articles) {
         articles.forEach(article => {
             const statusClass = `article-status status-${article.status}`;
             const statusText = getStatusText(article.status);
-            
-            // ⭐⭐ CORRECCIÓN: Usar IMAGE_BASE_URL ⭐⭐
             const imageUrl = article.image_url ? `${IMAGE_BASE_URL}${article.image_url}` : null;
             
+            // ⭐⭐ CORRECCIÓN: Usar fallback para author_name
+            const authorName = article.author_name || article.author || 'Anónimo';
+            
             articlesHTML += `
-                <div class="article-card" onclick="showArticleDetail(${article.id})">
-                    <div class="article-image">
-                        ${imageUrl ? 
-                            `<img src="${imageUrl}" alt="${article.title}" 
-                                  style="width:100%; height:100%; object-fit:cover;">` : 
-                            getCategoryIcon(article.category)
-                        }
-                    </div>
+                <div class="article-card" data-article-id="${article.id}" onclick="showArticleDetail(${article.id})">
                     <div class="article-content">
                         <h3 class="article-title">${article.title}</h3>
                         <div class="article-meta">
-                            <span>Por: ${article.author_name || article.author}</span>
+                            <span>Por: ${authorName}</span>  <!-- ⭐⭐ USAR LA VARIABLE CORREGIDA -->
                             <span>${formatDate(article.created_at || article.createdAt)}</span>
                         </div>
-                        <div class="article-excerpt">${article.content.substring(0, 100)}...</div>
-                        <div class="article-meta">
-                            <span>${getCategoryName(article.category)} • ${getChapterName(article.chapter)}</span>
-                            <span class="${statusClass}">${statusText}</span>
-                        </div>
-                        ${article.author_id === state.currentUser?.id && article.status !== 'published' ? 
-                          `<div class="action-buttons">
-                              <button onclick="event.stopPropagation(); editArticle(${article.id})">✏️ Editar</button>
-                           </div>` : ''}
-                        ${state.currentUser?.role === 'admin' ? 
-                          `<div class="action-buttons">
-                              <button class="btn-danger" onclick="event.stopPropagation(); deleteArticle(${article.id})">🗑️ Eliminar</button>
-                           </div>` : ''}
+                        <!-- ... resto del código ... -->
                     </div>
                 </div>
             `;
@@ -589,8 +605,11 @@ function renderFilteredArticles(articles) {
     }
     
     articlesGrid.innerHTML = articlesHTML;
+    
+    articles.forEach(article => {
+        loadAndDisplayLikes(article.id);
+    });
 }
-
 // Load users - ACTUALIZADA PARA PRODUCCIÓN
 async function loadUsers() {
     try {
@@ -853,39 +872,104 @@ function setupEventListeners() {
     // Login form submission
     const loginForm = document.getElementById('login-form');
     console.log('🔍 Formulario de login encontrado:', loginForm);
-    //  Verificar si el formulario existe antes de agregar el event listener
+    
+    // Verificar si el formulario existe antes de agregar el event listener
     if (loginForm) {
+        // ⭐⭐ REMOVER EVENT LISTENER EXISTENTE PARA EVITAR DUPLICADOS ⭐⭐
+        loginForm.removeEventListener('submit', handleLogin);
         loginForm.addEventListener('submit', handleLogin);
         console.log('✅ Event listener del login registrado correctamente');
-        // Puedes agregar más logs aquí si es necesario
     } else {
         console.error('❌ NO se encontró el formulario de login con id="login-form"');
     }
-    document.getElementById('login-form').addEventListener('submit', handleLogin);
-    document.getElementById('new-article-btn').addEventListener('click', showNewArticleForm);
-    document.getElementById('cancel-article-btn').addEventListener('click', cancelArticleForm);
-    document.getElementById('article-form').addEventListener('submit', saveArticle);
-    document.getElementById('comment-form').addEventListener('submit', addComment);
-    document.getElementById('create-user-form').addEventListener('submit', createUser);
-    document.getElementById('change-password-form').addEventListener('submit', changePassword);
     
-    // Character count for forms
-    document.getElementById('article-title').addEventListener('input', updateCharCount);
-    document.getElementById('article-content').addEventListener('input', updateCharCount);
-    document.getElementById('comment-content').addEventListener('input', updateCharCount);
+    // ⭐⭐ REMOVER Y RE-AGREGAR EVENT LISTENERS PARA EVITAR DUPLICADOS ⭐⭐
+    const elements = {
+        'new-article-btn': showNewArticleForm,
+        'cancel-article-btn': cancelArticleForm,
+        'article-form': saveArticle,
+        'comment-form': addComment,
+        'create-user-form': createUser,
+        'change-password-form': changePassword,
+        'article-title': updateCharCount,
+        'article-content': updateCharCount,
+        'comment-content': updateCharCount,
+        'new-user-username': checkUsernameAvailability,
+        'confirm-password': checkPasswordMatch
+    };
     
-    // Username availability check
-    document.getElementById('new-user-username').addEventListener('input', checkUsernameAvailability);
-    
-    // Password confirmation check
-    document.getElementById('confirm-password').addEventListener('input', checkPasswordMatch);
-    
-    // Search functionality
-    document.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter' && e.target.id === 'public-search') {
-            searchInMagazine();
+    Object.entries(elements).forEach(([id, handler]) => {
+        const element = document.getElementById(id);
+        if (element) {
+            const eventType = id.includes('form') ? 'submit' : 
+                             id.includes('btn') ? 'click' : 'input';
+            
+            // Remover event listener existente
+            element.removeEventListener(eventType, handler);
+            // Agregar nuevo event listener
+            element.addEventListener(eventType, handler);
+            console.log(`✅ Event listener para ${id} registrado correctamente`);
+        } else {
+            console.warn(`⚠️ Elemento no encontrado: ${id}`);
         }
     });
+    
+    // Search functionality
+    document.removeEventListener('keypress', handleSearchKeypress);
+    document.addEventListener('keypress', handleSearchKeypress);
+    
+    // ⭐⭐ AGREGAR ESTO - Navegación mejorada al Dashboard CON CONTROL DE DUPLICADOS ⭐⭐
+    document.removeEventListener('click', handleDashboardNavigation);
+    document.addEventListener('click', handleDashboardNavigation);
+    
+    console.log('✅ Todos los event listeners configurados correctamente');
+}
+
+// ⭐⭐ FUNCIÓN SEPARADA PARA MANEJAR NAVEGACIÓN AL DASHBOARD ⭐⭐
+function handleDashboardNavigation(e) {
+    // Detectar clics en enlaces del dashboard (múltiples formas)
+    const target = e.target.closest('a') || e.target;
+    const href = target.getAttribute('href');
+    const onclick = target.getAttribute('onclick');
+    
+    // Verificar si es un clic al dashboard
+    if ((onclick && onclick.includes('dashboard-page')) ||
+        (href && href.includes('dashboard')) ||
+        (target.textContent.includes('Dashboard') || target.textContent.includes('📊'))) {
+        
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // ⭐⭐ EVITAR MÚLTIPLES EJECUCIONES RÁPIDAS ⭐⭐
+        if (window.navigationCooldown) {
+            console.log('⏳ [NAV] Navegación en cooldown, ignorando clic...');
+            return;
+        }
+        
+        window.navigationCooldown = true;
+        console.log('🚀 Navegación detectada al Dashboard - redirigiendo...');
+        goToDashboard();
+        
+        // Cooldown de 1.5 segundos para evitar duplicaciones
+        setTimeout(() => {
+            window.navigationCooldown = false;
+        }, 1500);
+    }
+}
+
+// ⭐⭐ FUNCIÓN SEPARADA PARA MANEJAR BÚSQUEDA ⭐⭐
+function handleSearchKeypress(e) {
+    if (e.key === 'Enter' && e.target.id === 'public-search') {
+        // ⭐⭐ EVITAR EJECUCIONES MÚLTIPLES ⭐⭐
+        if (window.searchCooldown) return;
+        
+        window.searchCooldown = true;
+        searchInMagazine();
+        
+        setTimeout(() => {
+            window.searchCooldown = false;
+        }, 1000);
+    }
 }
 
 function loadDataFromStorage() {
@@ -991,11 +1075,7 @@ function loadPublicMagazine() {
     loadPublicExperiencias();
     loadPublicPosicionamiento();
 }
-
-// ⭐⭐ CORREGIR loadPublicPortafolios() ⭐⭐
-// ⭐⭐ FUNCIONES COMPLETAMENTE CORREGIDAS ⭐⭐
-
-// ⭐⭐ REEMPLAZA COMPLETAMENTE loadPublicPortafolios() ⭐⭐
+// En loadPublicPortafolios() - AGREGAR DEBUG
 function loadPublicPortafolios() {
     const grid = document.getElementById('public-portafolios-grid');
     const portafolios = state.articles.filter(a => a.chapter === 'portafolios' && a.status === 'published');
@@ -1004,36 +1084,36 @@ function loadPublicPortafolios() {
     
     let html = '';
     portafolios.forEach(article => {
-        // ⭐⭐ USAR SIEMPRE IMAGE_BASE_URL ⭐⭐
         const imageUrl = article.image_url ? `${IMAGE_BASE_URL}${article.image_url}` : null;
         
+        // ⭐⭐ DEBUG: Verificar la URL de la imagen
+        console.log('🔍 [IMAGE DEBUG] Artículo:', article.title);
+        console.log('   - image_url en BD:', article.image_url);
+        console.log('   - URL completa:', imageUrl);
+        console.log('   - ¿Tiene imagen?', !!imageUrl);
+        
         html += `
-            <div class="article-card" onclick="showPublicArticleDetail(${article.id})">
+            <div class="article-card" data-article-id="${article.id}" onclick="showPublicArticleDetail(${article.id})">
                 <div class="article-image">
                     ${imageUrl ? 
                         `<img src="${imageUrl}" alt="${article.title}" 
+                              onload="console.log('✅ Imagen cargada:', this.src)"
+                              onerror="console.log('❌ Error cargando imagen:', this.src)"
                               style="width:100%; height:100%; object-fit:cover; display:block;">` : 
                         `<div class="article-icon">${getCategoryIcon(article.category)}</div>`
                     }
                 </div>
-                <div class="article-content">
-                    <h3 class="article-title">${article.title}</h3>
-                    <div class="article-meta">
-                        <span>Por: ${article.author_name}</span>
-                        <span>${formatDate(article.created_at)}</span>
-                    </div>
-                    <div class="article-excerpt">${article.content.substring(0, 120)}...</div>
-                    <div class="article-meta">
-                        <span class="article-status ${getCategoryClass(article.category)}">${getCategoryName(article.category)}</span>
-                    </div>
-                </div>
+                <!-- ... resto del código ... -->
             </div>
         `;
     });
     
     grid.innerHTML = html || '<p class="no-content">No hay portafolios publicados aún.</p>';
+    
+    portafolios.forEach(article => {
+        loadAndDisplayLikes(article.id);
+    });
 }
-
 // ⭐⭐ REEMPLAZA COMPLETAMENTE loadPublicExperiencias() ⭐⭐
 function loadPublicExperiencias() {
     const grid = document.getElementById('public-experiencias-grid');
@@ -1041,13 +1121,15 @@ function loadPublicExperiencias() {
     
     let html = '';
     experiencias.forEach(article => {
-        // ⭐⭐ USAR SIEMPRE IMAGE_BASE_URL ⭐⭐
         const imageUrl = article.image_url ? `${IMAGE_BASE_URL}${article.image_url}` : null;
         const content = article.content || '';
         const excerpt = content.substring(0, 120) + (content.length > 120 ? '...' : '');
         
+        // ⭐⭐ CORRECCIÓN: Usar fallback para author_name
+        const authorName = article.author_name || article.author || 'Anónimo';
+        
         html += `
-            <div class="article-card" onclick="showPublicArticleDetail(${article.id})">
+            <div class="article-card" data-article-id="${article.id}" onclick="showPublicArticleDetail(${article.id})">
                 <div class="article-image">
                     ${imageUrl ? 
                         `<img src="${imageUrl}" alt="${article.title}" 
@@ -1058,19 +1140,20 @@ function loadPublicExperiencias() {
                 <div class="article-content">
                     <h3 class="article-title">${article.title}</h3>
                     <div class="article-meta">
-                        <span>Por: ${article.author_name || article.author}</span>
+                        <span>Por: ${authorName}</span>  <!-- ⭐⭐ USAR LA VARIABLE CORREGIDA -->
                         <span>${formatDate(article.created_at || article.createdAt)}</span>
                     </div>
-                    <div class="article-excerpt">${excerpt}</div>
-                    <div class="article-meta">
-                        <span class="article-status ${getCategoryClass(article.category)}">${getCategoryName(article.category)}</span>
-                    </div>
+                    <!-- ... resto del código ... -->
                 </div>
             </div>
         `;
     });
     
     grid.innerHTML = html || '<p class="no-content">No hay experiencias pedagógicas publicadas aún.</p>';
+    
+    experiencias.forEach(article => {
+        loadAndDisplayLikes(article.id);
+    });
 }
 
 // ⭐⭐ REEMPLAZA COMPLETAMENTE loadPublicPosicionamiento() ⭐⭐
@@ -1080,36 +1163,32 @@ function loadPublicPosicionamiento() {
     
     let html = '';
     posicionamientos.forEach(article => {
-        // ⭐⭐ USAR SIEMPRE IMAGE_BASE_URL ⭐⭐
         const imageUrl = article.image_url ? `${IMAGE_BASE_URL}${article.image_url}` : null;
         const content = article.content || '';
         const excerpt = content.substring(0, 120) + (content.length > 120 ? '...' : '');
         
+        // ⭐⭐ CORRECCIÓN: Usar fallback para author_name
+        const authorName = article.author_name || article.author || 'Anónimo';
+        
         html += `
-            <div class="article-card" onclick="showPublicArticleDetail(${article.id})">
-                <div class="article-image">
-                    ${imageUrl ? 
-                        `<img src="${imageUrl}" alt="${article.title}" 
-                              style="width:100%; height:100%; object-fit:cover; display:block;">` : 
-                        `<div class="article-icon">${getCategoryIcon(article.category)}</div>`
-                    }
-                </div>
+            <div class="article-card" data-article-id="${article.id}" onclick="showPublicArticleDetail(${article.id})">
                 <div class="article-content">
                     <h3 class="article-title">${article.title}</h3>
                     <div class="article-meta">
-                        <span>Por: ${article.author_name || article.author}</span>
+                        <span>Por: ${authorName}</span>  <!-- ⭐⭐ USAR LA VARIABLE CORREGIDA -->
                         <span>${formatDate(article.created_at || article.createdAt)}</span>
                     </div>
-                    <div class="article-excerpt">${excerpt}</div>
-                    <div class="article-meta">
-                        <span class="article-status ${getCategoryClass(article.category)}">${getCategoryName(article.category)}</span>
-                    </div>
+                    <!-- ... resto del código ... -->
                 </div>
             </div>
         `;
     });
     
     grid.innerHTML = html || '<p class="no-content">No hay reflexiones críticas publicadas aún.</p>';
+    
+    posicionamientos.forEach(article => {
+        loadAndDisplayLikes(article.id);
+    });
 }
 // Show public article detail - IMPROVED VERSION
 function showPublicArticleDetail(articleId) {
@@ -1557,20 +1636,41 @@ function checkPasswordMatch() {
     }
 }
 
-// Update dashboard with current data
-// Update dashboard with current data
-function updateDashboard() {
+// ⭐⭐ CORREGIR updateDashboard() - EVITAR LLAMADAS DUPLICADAS ⭐⭐
+// ⭐⭐ MEJORAR updateDashboard() - CONTROLAR NOTIFICACIONES ⭐⭐
+async function updateDashboard() {
     if (!state.currentUser) return;
     
+    // ⭐⭐ EVITAR EJECUCIONES SIMULTÁNEAS ⭐⭐
+    if (window.dashboardUpdating) {
+        console.log('⏳ [DASHBOARD] Actualización en curso, ignorando llamada duplicada...');
+        return;
+    }
+    
     try {
-        // ⭐⭐ VERIFICAR QUE state.articles EXISTA ⭐⭐
+        window.dashboardUpdating = true;
+        console.log('📊 [DASHBOARD] Actualizando estadísticas...');
+        
+        // ⭐⭐ CARGAR ARTÍCULOS ACTUALIZADOS DESDE LA BD ⭐⭐
+        const lastUpdate = window.lastDashboardUpdate || 0;
+        const now = Date.now();
+        
+        if (now - lastUpdate > 5000) {
+            console.log('🔄 [DASHBOARD] Cargando datos frescos desde API...');
+            await loadInitialData();
+            window.lastDashboardUpdate = now;
+        } else {
+            console.log('⚡ [DASHBOARD] Usando datos en caché');
+        }
+        
         const articles = state.articles || [];
         const users = state.users || [];
+        
+        console.log('📊 [DASHBOARD] Artículos en estado:', articles.length);
         
         const publishedCount = articles.filter(a => a.status === 'published').length;
         const pendingCount = articles.filter(a => a.status === 'pending').length;
         
-        // ⭐⭐ VERIFICAR QUE articles EXISTA ANTES DE REDUCE ⭐⭐
         const commentsCount = articles.reduce((total, article) => {
             const comments = article.comments || [];
             return total + comments.length;
@@ -1578,13 +1678,30 @@ function updateDashboard() {
         
         const usersCount = users.filter(u => u.active).length;
         
+        console.log('📊 [DASHBOARD] Estadísticas calculadas:', {
+            published: publishedCount,
+            pending: pendingCount,
+            comments: commentsCount,
+            users: usersCount
+        });
+        
+        // Actualizar la UI
         document.getElementById('published-count').textContent = publishedCount;
         document.getElementById('pending-count').textContent = pendingCount;
         document.getElementById('comments-count').textContent = commentsCount;
         document.getElementById('users-count').textContent = usersCount;
         document.getElementById('welcome-user-name').textContent = state.currentUser.name;
         
-        loadNotifications();
+        // ⭐⭐ CARGAR NOTIFICACIONES SOLO SI ES NECESARIO ⭐⭐
+        const lastNotificationUpdate = window.lastNotificationUpdate || 0;
+        if (now - lastNotificationUpdate > 10000) { // Actualizar cada 10 segundos
+            console.log('🔔 [DASHBOARD] Actualizando notificaciones...');
+            await loadNotifications();
+            window.lastNotificationUpdate = now;
+        } else {
+            console.log('⚡ [DASHBOARD] Notificaciones en caché');
+            renderNotifications(); // Solo renderizar las existentes
+        }
         
     } catch (error) {
         console.error('❌ Error en updateDashboard:', error);
@@ -1593,22 +1710,111 @@ function updateDashboard() {
         document.getElementById('pending-count').textContent = '0';
         document.getElementById('comments-count').textContent = '0';
         document.getElementById('users-count').textContent = '0';
+    } finally {
+        window.dashboardUpdating = false;
+    }
+}
+// ⭐⭐ FUNCIÓN MEJORADA PARA IR AL DASHBOARD ⭐⭐
+// ⭐⭐ MEJORAR goToDashboard() ⭐⭐
+function goToDashboard() {
+    console.log('🚀 Navegando al Dashboard con datos actualizados...');
+    showPage('dashboard-page');
+    
+    // Pequeño delay para asegurar que la página se muestre primero
+    setTimeout(() => {
+        updateDashboard();
+    }, 100);
+}
+
+// ⭐⭐ FUNCIÓN PARA FORZAR ACTUALIZACIÓN DEL DASHBOARD ⭐⭐
+// ⭐⭐ MEJORAR forceRefreshDashboard() - CON DEBOUNCE ⭐⭐
+async function forceRefreshDashboard() {
+    // ⭐⭐ EVITAR CLICS RÁPIDOS MÚLTIPLES ⭐⭐
+    if (window.refreshCooldown) {
+        console.log('⏳ [REFRESH] Espera un momento antes de actualizar de nuevo...');
+        return;
+    }
+    
+    console.log('🔄 Forzando actualización del dashboard...');
+    
+    // Mostrar loading
+    const refreshBtn = document.querySelector('[onclick="forceRefreshDashboard()"]');
+    if (refreshBtn) {
+        const originalText = refreshBtn.textContent;
+        refreshBtn.textContent = '⏳';
+        refreshBtn.disabled = true;
+        
+        // Activar cooldown
+        window.refreshCooldown = true;
+        
+        try {
+            await updateDashboard();
+            console.log('✅ Dashboard actualizado correctamente');
+        } catch (error) {
+            console.error('❌ Error actualizando dashboard:', error);
+        } finally {
+            // Restaurar botón después de 1 segundo
+            setTimeout(() => {
+                refreshBtn.textContent = originalText;
+                refreshBtn.disabled = false;
+                window.refreshCooldown = false;
+            }, 1000);
+        }
+    } else {
+        await updateDashboard();
     }
 }
 
 // Load notifications
-// Cargar notificaciones desde la base de datos
 async function loadNotifications() {
-    if (!state.currentUser) return;
+    if (!state.currentUser) {
+        console.log('🔔 [NOTIFICATIONS] Usuario no logueado');
+        return;
+    }
+
+    // ⭐⭐ EVITAR EJECUCIONES SIMULTÁNEAS ⭐⭐
+    if (window.loadingNotifications) {
+        console.log('⏳ [NOTIFICATIONS] Carga en curso, ignorando llamada duplicada...');
+        return;
+    }
 
     try {
-        const data = await apiRequest(`/notifications?user_id=${state.currentUser.id}`);
-        state.notifications = data.notifications || [];
+        window.loadingNotifications = true;
+        console.log(`🔔 [NOTIFICATIONS] Cargando notificaciones para usuario: ${state.currentUser.id}`);
+
+        const response = await fetch(`${API_BASE_URL}/notifications?user_id=${state.currentUser.id}`);
+        
+        // ⭐⭐ VERIFICAR SI LA RESPUESTA ES JSON VÁLIDO ⭐⭐
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const textResponse = await response.text();
+            console.error('❌ [NOTIFICATIONS] El servidor no devolvió JSON:', textResponse.substring(0, 200));
+            throw new Error('Respuesta del servidor no es JSON');
+        }
+        
+        const data = await response.json();
+        
+        console.log('🔔 [NOTIFICATIONS] Respuesta de la API:', data);
+        
+        if (data.success) {
+            state.notifications = data.notifications || [];
+            console.log(`🔔 [NOTIFICATIONS] ${state.notifications.length} notificaciones cargadas`);
+        } else {
+            throw new Error(data.error || 'Error en la respuesta del servidor');
+        }
+        
         renderNotifications();
+
     } catch (error) {
-        console.error('Error cargando notificaciones:', error);
+        console.error('❌ Error cargando notificaciones:', error);
+        console.log('🔔 [NOTIFICATIONS] Fallback a notificaciones locales');
+        
         // Fallback a localStorage
+        const savedNotifications = JSON.parse(localStorage.getItem('revista_notifications') || '[]');
+        state.notifications = savedNotifications.filter(n => n.user_id === state.currentUser.id);
         renderNotifications();
+    } finally {
+        window.loadingNotifications = false;
     }
 }
 
@@ -1877,11 +2083,13 @@ function removeImage() {
 }
 
 // Save article (create or update)
+// ⭐⭐ CORREGIR saveArticle() - MEJORAR MANEJO DE ERRORES Y SESIÓN ⭐⭐
 async function saveArticle(e) {
     e.preventDefault();
     
     if (!state.currentUser) {
         alert('❌ Por favor inicie sesión para crear artículos.');
+        showPage('login-page');
         return;
     }
     
@@ -1893,10 +2101,10 @@ async function saveArticle(e) {
     const status = document.getElementById('article-status').value;
     const imageFile = document.getElementById('article-image-upload').files[0];
     
-    console.log('📝 [DEBUG] Creando artículo con imagen...', {
-        title, category, chapter, content, status,
-        author_id: state.currentUser.id,
-        hasImage: !!imageFile
+    console.log('📝 [SAVE ARTICLE] Creando artículo con usuario:', {
+        userId: state.currentUser.id,
+        username: state.currentUser.username,
+        title: title
     });
     
     // Validate form
@@ -1911,7 +2119,7 @@ async function saveArticle(e) {
         
         // ✅ CONVERTIR IMAGEN A BASE64 SI EXISTE
         if (imageFile) {
-            console.log('🖼️ [DEBUG] Procesando imagen...');
+            console.log('🖼️ [SAVE ARTICLE] Procesando imagen...');
             image_base64 = await convertImageToBase64(imageFile);
         }
 
@@ -1920,32 +2128,44 @@ async function saveArticle(e) {
             category,
             chapter,
             content,
-            author_id: state.currentUser.id,
+            author_id: state.currentUser.id, // ⭐⭐ VERIFICAR QUE ESTÉ CORRECTO
             status,
-            image_base64: image_base64,  // ✅ ENVIAR IMAGEN COMO BASE64
+            image_base64: image_base64,
             image_url: null
         };
         
-        console.log('📤 [DEBUG] Enviando a API con imagen:', {
+        console.log('📤 [SAVE ARTICLE] Enviando a API:', {
             ...articleData,
+            author_id: state.currentUser.id, // ⭐⭐ CONFIRMAR USER ID
             image_base64: image_base64 ? `[BASE64: ${image_base64.substring(0, 50)}...]` : null
         });
         
         const response = await fetch(`${API_BASE_URL}/articles`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                // ⭐⭐ AGREGAR HEADERS DE AUTENTICACIÓN ⭐⭐
+                'user-id': state.currentUser.id.toString(),
+                'user-role': state.currentUser.role
             },
             body: JSON.stringify(articleData)
         });
 
-        console.log('📨 [DEBUG] Respuesta HTTP:', response.status);
+        console.log('📨 [SAVE ARTICLE] Respuesta HTTP:', response.status);
         
         const data = await response.json();
-        console.log('📊 [DEBUG] Respuesta del servidor:', data);
+        console.log('📊 [SAVE ARTICLE] Respuesta del servidor:', data);
 
         if (response.ok) {
-            console.log('✅ [DEBUG] Artículo con imagen guardado en BD:', data.article);
+            console.log('✅ [SAVE ARTICLE] Artículo creado exitosamente');
+            
+            // ⭐⭐ VERIFICAR QUE EL USUARIO SIGA LOGUEADO ⭐⭐
+            if (!state.currentUser) {
+                console.error('❌ [SAVE ARTICLE] USUARIO PERDIÓ LA SESIÓN!');
+                alert('❌ Se perdió la sesión. Por favor inicie sesión nuevamente.');
+                showPage('login-page');
+                return;
+            }
             
             // Actualizar estado local también
             if (articleId) {
@@ -1955,7 +2175,7 @@ async function saveArticle(e) {
                     state.articles[index] = { 
                         ...state.articles[index], 
                         ...data.article,
-                        image_url: data.image_url // ✅ GUARDAR URL DE LA IMAGEN
+                        image_url: data.image_url
                     };
                 }
             } else {
@@ -1967,11 +2187,13 @@ async function saveArticle(e) {
                     chapter,
                     content,
                     author: state.currentUser.name,
-                    authorId: state.currentUser.id,
+                    authorId: state.currentUser.id, // ⭐⭐ MANTENER CONSISTENCIA
+                    author_id: state.currentUser.id, // ⭐⭐ AGREGAR author_id también
                     imageFile: imageFile || null,
-                    image_url: data.image_url,  // ✅ GUARDAR URL DE LA IMAGEN
+                    image_url: data.image_url,
                     status,
                     createdAt: new Date().toISOString().split('T')[0],
+                    created_at: new Date().toISOString().split('T')[0],
                     comments: []
                 };
                 state.articles.push(newArticle);
@@ -1983,57 +2205,74 @@ async function saveArticle(e) {
             updateDashboard();
             
             if (status === 'pending') {
-                alert('✅ Artículo con imagen enviado para revisión exitosamente.');
+                alert('✅ Artículo enviado para revisión exitosamente.');
             } else {
-                alert('✅ Artículo con imagen guardado como borrador.');
+                alert('✅ Artículo guardado como borrador.');
             }
             
         } else {
-            console.error('❌ [DEBUG] Error del servidor:', data);
+            console.error('❌ [SAVE ARTICLE] Error del servidor:', data);
+            
+            // ⭐⭐ VERIFICAR SI ES ERROR DE AUTENTICACIÓN ⭐⭐
+            if (data.error && data.error.includes('autorizado') || data.error.includes('autenticación')) {
+                alert('❌ Error de autenticación. Por favor inicie sesión nuevamente.');
+                state.currentUser = null;
+                updatePublicHeader();
+                showPage('login-page');
+                return;
+            }
+            
             alert('❌ Error guardando artículo: ' + (data.error || 'Error desconocido'));
         }
         
     } catch (error) {
-        console.error('💥 [DEBUG] Error completo:', error);
+        console.error('💥 [SAVE ARTICLE] Error completo:', error);
         
-        // FALLBACK: Guardar solo en localStorage si falla la conexión
-        console.log('📱 [DEBUG] Guardando localmente (modo offline)...');
-        
-        if (articleId) {
-            const index = state.articles.findIndex(a => a.id === parseInt(articleId));
-            if (index !== -1) {
-                state.articles[index].title = title;
-                state.articles[index].category = category;
-                state.articles[index].chapter = chapter;
-                state.articles[index].content = content;
-                state.articles[index].status = status;
-                state.articles[index].updatedAt = new Date().toISOString().split('T')[0];
-                
-                if (imageFile) {
-                    state.articles[index].imageFile = imageFile;
+        // ⭐⭐ VERIFICAR SI ES ERROR DE CONEXIÓN ⭐⭐
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            console.log('📱 [SAVE ARTICLE] Guardando localmente (modo offline)...');
+            
+            // FALLBACK: Guardar solo en localStorage si falla la conexión
+            if (articleId) {
+                const index = state.articles.findIndex(a => a.id === parseInt(articleId));
+                if (index !== -1) {
+                    state.articles[index].title = title;
+                    state.articles[index].category = category;
+                    state.articles[index].chapter = chapter;
+                    state.articles[index].content = content;
+                    state.articles[index].status = status;
+                    state.articles[index].updatedAt = new Date().toISOString().split('T')[0];
+                    
+                    if (imageFile) {
+                        state.articles[index].imageFile = imageFile;
+                    }
                 }
+            } else {
+                const newArticle = {
+                    id: state.articles.length > 0 ? Math.max(...state.articles.map(a => a.id)) + 1 : 1,
+                    title,
+                    category,
+                    chapter,
+                    content,
+                    author: state.currentUser.name,
+                    authorId: state.currentUser.id,
+                    author_id: state.currentUser.id,
+                    imageFile: imageFile || null,
+                    status,
+                    createdAt: new Date().toISOString().split('T')[0],
+                    created_at: new Date().toISOString().split('T')[0],
+                    comments: []
+                };
+                state.articles.push(newArticle);
             }
+            
+            saveDataToStorage();
+            showPage('articles-page');
+            loadArticles();
+            alert('⚠️ Artículo guardado localmente (modo offline). Se sincronizará cuando haya conexión.');
         } else {
-            const newArticle = {
-                id: state.articles.length > 0 ? Math.max(...state.articles.map(a => a.id)) + 1 : 1,
-                title,
-                category,
-                chapter,
-                content,
-                author: state.currentUser.name,
-                authorId: state.currentUser.id,
-                imageFile: imageFile || null,
-                status,
-                createdAt: new Date().toISOString().split('T')[0],
-                comments: []
-            };
-            state.articles.push(newArticle);
+            alert('❌ Error inesperado: ' + error.message);
         }
-        
-        saveDataToStorage();
-        showPage('articles-page');
-        loadArticles();
-        alert('⚠️ Artículo guardado localmente (modo offline). Se sincronizará cuando haya conexión.');
     }
 }
 
@@ -2308,7 +2547,7 @@ async function rejectArticle(articleId) {
         }
     }
 }
-// ⭐⭐ CORREGIR showArticleDetail() ⭐⭐
+// ⭐⭐ CORREGIR showArticleDetail() - CARGAR COMENTARIOS DESDE BD ⭐⭐
 function showArticleDetail(articleId) {
     const article = state.articles.find(a => a.id === articleId);
     if (!article) {
@@ -2322,7 +2561,7 @@ function showArticleDetail(articleId) {
     
     let actionsHTML = '';
 
-    if (state.currentUser.role === 'admin') {
+    if (state.currentUser?.role === 'admin') {
         actionsHTML += `
             <div class="action-buttons">
                 <button class="btn-danger" onclick="deleteArticle(${article.id})">🗑️ Eliminar Artículo</button>
@@ -2330,14 +2569,14 @@ function showArticleDetail(articleId) {
         `;
     }
 
-    if ((state.currentUser.role === 'teacher' || state.currentUser.role === 'admin') && article.status === 'pending') {
+    if ((state.currentUser?.role === 'teacher' || state.currentUser?.role === 'admin') && article.status === 'pending') {
         actionsHTML = `
             <div class="action-buttons">
                 <button class="btn-success" onclick="approveArticle(${article.id})">✅ Aprobar</button>
                 <button class="btn-danger" onclick="rejectArticle(${article.id})">❌ Rechazar</button>
             </div>
         `;
-    } else if (state.currentUser.role === 'student' && article.author_id === state.currentUser.id && article.status !== 'published') {
+    } else if (state.currentUser?.role === 'student' && article.author_id === state.currentUser.id && article.status !== 'published') {
         actionsHTML = `
             <div class="action-buttons">
                 <button onclick="editArticle(${article.id})">✏️ Editar</button>
@@ -2358,7 +2597,8 @@ function showArticleDetail(articleId) {
     // ⭐⭐ CORRECCIÓN: Usar IMAGE_BASE_URL para la imagen ⭐⭐
     const imageUrl = article.image_url ? `${IMAGE_BASE_URL}${article.image_url}` : null;
     
-    const comments = article.comments || [];
+    // ⭐⭐ IMPORTANTE: No usar article.comments aquí - se cargarán desde BD ⭐⭐
+    const commentsCount = 0; // Se actualizará cuando carguemos los comentarios
     
     articleDetail.innerHTML = `
         <div class="form-container">
@@ -2379,8 +2619,9 @@ function showArticleDetail(articleId) {
     `;
     
     document.getElementById('comment-article-id').value = articleId;
-    document.getElementById('comments-count-badge').textContent = `(${comments.length})`;
+    document.getElementById('comments-count-badge').textContent = `(cargando...)`;
     
+    // ⭐⭐ CORRECCIÓN CRÍTICA: Cargar comentarios desde la BD ⭐⭐
     loadComments(articleId);
     showPage('article-detail-page');
 }
@@ -2484,6 +2725,79 @@ async function deleteArticle(articleId) {
         }
     }
 }
+// ⭐⭐ FUNCIÓN PARA ELIMINAR USUARIOS (SOLO ADMIN) ⭐⭐
+async function deleteUser(userId) {
+    if (!state.currentUser) {
+        alert('❌ Debes iniciar sesión para realizar esta acción.');
+        return;
+    }
+
+    // Verificar permisos - SOLO ADMIN
+    if (state.currentUser.role !== 'admin') {
+        alert('❌ No autorizado. Solo los administradores pueden eliminar usuarios.');
+        return;
+    }
+
+    // Obtener información del usuario a eliminar
+    const userToDelete = state.users.find(u => u.id === userId);
+    if (!userToDelete) {
+        alert('❌ Usuario no encontrado.');
+        return;
+    }
+
+    // ⭐⭐ CONFIRMACIÓN DE SEGURIDAD EXTREMA ⭐⭐
+    const confirmDelete = confirm(
+        `🚨 ¿ESTÁ ABSOLUTAMENTE SEGURO DE QUE DESEA ELIMINAR ESTE USUARIO?\n\n` +
+        `👤 Usuario: ${userToDelete.name}\n` +
+        `📧 Username: ${userToDelete.username}\n` +
+        `🎯 Rol: ${getRoleName(userToDelete.role)}\n\n` +
+        `⚠️  ESTA ACCIÓN ES PERMANENTE E IRREVERSIBLE\n` +
+        `❌ Se eliminarán TODOS los datos del usuario\n` +
+        `📝 NO podrá recuperarse la información\n\n` +
+        `Escriba "ELIMINAR" para confirmar:`
+    );
+
+    if (!confirmDelete) return;
+
+    const userInput = prompt('Para confirmar la eliminación, escriba "ELIMINAR":');
+    if (userInput !== 'ELIMINAR') {
+        alert('❌ Eliminación cancelada. No se escribió la palabra de confirmación correctamente.');
+        return;
+    }
+
+    try {
+        console.log('🗑️ [FRONTEND] Eliminando usuario:', userId);
+        
+        const response = await fetch(`${API_BASE_URL}/users/${userId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'user-role': state.currentUser.role,
+                'user-id': state.currentUser.id.toString()
+            }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            console.log('✅ [FRONTEND] Usuario eliminado:', data);
+            
+            // Actualizar la lista de usuarios
+            await loadUsers();
+            
+            // Mostrar notificación de éxito
+            alert(`✅ Usuario "${userToDelete.name}" eliminado exitosamente.`);
+            
+        } else {
+            console.error('❌ [FRONTEND] Error del servidor:', data);
+            alert('❌ Error eliminando usuario: ' + (data.error || 'Error desconocido'));
+        }
+        
+    } catch (error) {
+        console.error('💥 [FRONTEND] Error de conexión:', error);
+        alert('❌ Error de conexión al eliminar usuario.');
+    }
+}
 // ✅ FUNCIÓN AUXILIAR PARA RECARGAR VISTA ACTUAL
 function reloadCurrentView() {
     if (state.currentPage === 'articles-page') {
@@ -2496,24 +2810,64 @@ function reloadCurrentView() {
     }
     updateDashboard();
 }
+// ⭐⭐ CORREGIR loadComments() - CARGAR DESDE LA BD ⭐⭐
+async function loadComments(articleId) {
+    try {
+        const commentsList = document.getElementById('comments-list');
+        if (!commentsList) {
+            console.error('❌ Elemento comments-list no encontrado');
+            return;
+        }
 
-// Load comments for an article
-// ⭐⭐ ACTUALIZAR loadComments() CON NUEVO ESTILO ⭐⭐
-function loadComments(articleId) {
-    const article = state.articles.find(a => a.id === articleId);
-    if (!article) {
-        console.error('❌ Artículo no encontrado para comentarios:', articleId);
-        return;
+        console.log('💬 [COMMENTS] Cargando comentarios para artículo:', articleId);
+        
+        // ⭐⭐ PRIMERO: Cargar comentarios desde la API ⭐⭐
+        const response = await fetch(`${API_BASE_URL}/articles/${articleId}/comments`);
+        
+        if (response.ok) {
+            const data = await response.json();
+            
+            if (data.success) {
+                console.log('✅ [COMMENTS] Comentarios cargados desde BD:', data.comments.length);
+                
+                // ⭐⭐ ACTUALIZAR el artículo en el state local ⭐⭐
+                const article = state.articles.find(a => a.id === articleId);
+                if (article) {
+                    article.comments = data.comments;
+                    saveDataToStorage(); // Guardar en localStorage
+                }
+                
+                // ⭐⭐ RENDERIZAR los comentarios ⭐⭐
+                renderCommentsList(data.comments, commentsList);
+                
+                // ⭐⭐ ACTUALIZAR CONTADOR ⭐⭐
+                document.getElementById('comments-count-badge').textContent = `(${data.comments.length})`;
+                
+            } else {
+                throw new Error(data.error || 'Error cargando comentarios');
+            }
+        } else {
+            throw new Error('Error en la respuesta del servidor');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error cargando comentarios:', error);
+        
+        // ⭐⭐ FALLBACK: Usar comentarios locales si hay error ⭐⭐
+        console.log('📱 [COMMENTS] Usando comentarios locales como fallback');
+        const article = state.articles.find(a => a.id === articleId);
+        const comments = article?.comments || [];
+        const commentsList = document.getElementById('comments-list');
+        
+        if (commentsList) {
+            renderCommentsList(comments, commentsList);
+            document.getElementById('comments-count-badge').textContent = `(${comments.length})`;
+        }
     }
-    
-    const commentsList = document.getElementById('comments-list');
-    if (!commentsList) {
-        console.error('❌ Elemento comments-list no encontrado');
-        return;
-    }
-    
-    const comments = article.comments || [];
-    
+}
+// ⭐⭐ FUNCIÓN AUXILIAR PARA RENDERIZAR COMENTARIOS ⭐⭐
+// ⭐⭐ MODIFICAR renderCommentsList() PARA AGREGAR BOTÓN ELIMINAR ⭐⭐
+function renderCommentsList(comments, commentsList, articleId) {
     let commentsHTML = '';
     
     if (comments.length === 0) {
@@ -2531,9 +2885,17 @@ function loadComments(articleId) {
         );
         
         sortedComments.forEach(comment => {
-            const author = comment.author || 'Anónimo';
+            const author = comment.author || comment.author_name || 'Anónimo';
             const content = comment.content || '';
             const createdAt = comment.created_at || comment.createdAt || 'Fecha desconocida';
+            
+            // ⭐⭐ BOTÓN ELIMINAR SOLO PARA ADMIN Y DOCENTE ⭐⭐
+            const deleteButton = (state.currentUser?.role === 'admin' || state.currentUser?.role === 'teacher') ? 
+                `<button class="btn-danger btn-small" 
+                        onclick="deleteComment(${comment.id}, ${articleId})"
+                        title="Eliminar comentario">
+                    🗑️
+                </button>` : '';
             
             commentsHTML += `
                 <div class="comment-item">
@@ -2542,8 +2904,13 @@ function loadComments(articleId) {
                     </div>
                     <div class="comment-content">
                         <div class="comment-header">
-                            <strong class="comment-author">${author}</strong>
-                            <span class="comment-time">${getRelativeTime(createdAt)}</span>
+                            <div class="comment-author-info">
+                                <strong class="comment-author">${author}</strong>
+                                <span class="comment-time">${getRelativeTime(createdAt)}</span>
+                            </div>
+                            <div class="comment-actions">
+                                ${deleteButton}
+                            </div>
                         </div>
                         <div class="comment-text">${content}</div>
                         <div class="comment-meta">
@@ -2556,7 +2923,7 @@ function loadComments(articleId) {
     }
     
     commentsList.innerHTML = commentsHTML;
-    console.log('💬 Comentarios cargados con nuevo estilo:', comments.length);
+    console.log('💬 Comentarios renderizados:', comments.length);
 }
 
 // Add comment to an article
@@ -2730,7 +3097,253 @@ async function addComment(e) {
         alert('⚠️ Comentario guardado localmente (modo offline). Se sincronizará cuando haya conexión.');
     }
 }
+// ⭐⭐ FUNCIÓN PARA ELIMINAR COMENTARIOS (ADMIN Y DOCENTE) ⭐⭐
+async function deleteComment(commentId, articleId) {
+    if (!state.currentUser) {
+        alert('❌ Debes iniciar sesión para realizar esta acción.');
+        return;
+    }
 
+    // Verificar permisos
+    if (state.currentUser.role !== 'admin' && state.currentUser.role !== 'teacher') {
+        alert('❌ No autorizado. Solo administradores y docentes pueden eliminar comentarios.');
+        return;
+    }
+
+    // Confirmación de seguridad
+    const confirmDelete = confirm(`¿Está seguro de que desea ELIMINAR este comentario?\n\n⚠️ Esta acción no se puede deshacer.`);
+    
+    if (!confirmDelete) {
+        return;
+    }
+
+    try {
+        console.log('🗑️ [FRONTEND] Eliminando comentario:', commentId);
+        
+        const response = await fetch(`${API_BASE_URL}/comments/${commentId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'user-role': state.currentUser.role,
+                'user-id': state.currentUser.id.toString()
+            }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            console.log('✅ [FRONTEND] Comentario eliminado:', data);
+            
+            // Recargar los comentarios para reflejar el cambio
+            await loadComments(articleId);
+            
+            // Mostrar notificación de éxito
+            alert('✅ Comentario eliminado exitosamente.');
+            
+        } else {
+            console.error('❌ [FRONTEND] Error del servidor:', data);
+            alert('❌ Error eliminando comentario: ' + (data.error || 'Error desconocido'));
+        }
+        
+    } catch (error) {
+        console.error('💥 [FRONTEND] Error de conexión:', error);
+        alert('❌ Error de conexión al eliminar comentario.');
+    }
+}
+
+// ⭐⭐ SISTEMA DE LIKES ⭐⭐
+
+// Función para dar/quitar like
+// En script.js - CORREGIR toggleLike
+async function toggleLike(articleId) {
+    try {
+        console.log('❤️ [LIKE] Tocando like para artículo:', articleId);
+        
+        // ⭐⭐ CORRECCIÓN: No enviar user_id si es null/undefined
+        const likeData = {
+            user_id: state.currentUser?.id || null,  // Esto será null real, no string
+            user_ip: await getClientIP(),
+            user_agent: navigator.userAgent
+        };
+
+        console.log('📡 [LIKE] Datos de like:', likeData);
+
+        const response = await fetch(`${API_BASE_URL}/articles/${articleId}/like`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(likeData)
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            console.log('✅ [LIKE] Like gestionado:', data);
+            
+            // Actualizar la interfaz
+            await updateArticleLikes(articleId, data.likeCount, data.liked);
+            
+            // Mostrar feedback visual
+            showLikeFeedback(data.liked);
+            
+        } else {
+            console.error('❌ [LIKE] Error del servidor:', data);
+            alert('❌ Error: ' + (data.error || 'No se pudo procesar el like'));
+        }
+
+    } catch (error) {
+        console.error('💥 [LIKE] Error de conexión:', error);
+        alert('❌ Error de conexión al procesar like');
+    }
+}
+
+// Función para obtener IP del cliente (simplificada)
+async function getClientIP() {
+    try {
+        // Intentar obtener IP real
+        const response = await fetch('https://api.ipify.org?format=json');
+        const data = await response.json();
+        return data.ip;
+    } catch (error) {
+        // Fallback a una IP generada basada en user agent
+        console.log('🌐 [LIKE] Usando IP fallback');
+        return 'anonymous_' + Math.random().toString(36).substring(2, 15);
+    }
+}
+
+// Actualizar interfaz de likes
+async function updateArticleLikes(articleId, likeCount, userLiked) {
+    // Actualizar en tarjetas de artículos
+    const likeElements = document.querySelectorAll(`[data-article-id="${articleId}"] .like-section`);
+    likeElements.forEach(element => {
+        const countElement = element.querySelector('.like-count');
+        const buttonElement = element.querySelector('.like-btn');
+        
+        if (countElement) countElement.textContent = likeCount;
+        if (buttonElement) {
+            buttonElement.className = userLiked ? 'like-btn liked' : 'like-btn';
+            buttonElement.innerHTML = userLiked ? '❤️' : '🤍';
+        }
+    });
+    
+    // Actualizar en vista detalle
+    const detailLikeElement = document.querySelector('#article-detail-content .like-section');
+    if (detailLikeElement) {
+        const countElement = detailLikeElement.querySelector('.like-count');
+        const buttonElement = detailLikeElement.querySelector('.like-btn');
+        
+        if (countElement) countElement.textContent = likeCount;
+        if (buttonElement) {
+            buttonElement.className = userLiked ? 'like-btn liked' : 'like-btn';
+            buttonElement.innerHTML = userLiked ? '❤️' : '🤍';
+        }
+    }
+}
+
+// Feedback visual para likes
+function showLikeFeedback(liked) {
+    // Crear elemento de feedback
+    const feedback = document.createElement('div');
+    feedback.className = `like-feedback ${liked ? 'liked' : 'unliked'}`;
+    feedback.innerHTML = liked ? '❤️ ¡Te gusta este artículo!' : '💔 Ya no te gusta este artículo';
+    feedback.style.cssText = `
+        position: fixed;
+        top: 100px;
+        right: 20px;
+        background: ${liked ? '#dc2626' : '#6b7280'};
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        z-index: 10000;
+        animation: slideInRight 0.3s ease-out;
+    `;
+    
+    document.body.appendChild(feedback);
+    
+    // Remover después de 2 segundos
+    setTimeout(() => {
+        feedback.remove();
+    }, 2000);
+}
+
+// Cargar likes para un artículo
+// En script.js - CORREGIR esta función
+async function loadArticleLikes(articleId) {
+    try {
+        // ⭐⭐ CORRECCIÓN: Verificar si user_id es válido, no enviar 'null'
+        const user_id = state.currentUser?.id || null;
+        
+        // Si user_id es null, no enviar el parámetro
+        let url = `${API_BASE_URL}/articles/${articleId}/likes`;
+        if (user_id) {
+            url += `?user_id=${user_id}`;
+        }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success) {
+            return data;
+        }
+    } catch (error) {
+        console.error('❌ Error cargando likes:', error);
+    }
+    
+    return { likeCount: 0, userLiked: false };
+}
+// =======================
+// SISTEMA DE LIKES - FUNCIONES AUXILIARES
+// =======================
+
+// ⭐⭐ AGREGAR ESTA FUNCIÓN EN script.js - después de las funciones de utilidad
+function addLikesToArticleHTML(article, articleId) {
+    return `
+        <div class="article-card" data-article-id="${articleId}">
+            <div class="article-image">
+                ${article.image_url ? 
+                    `<img src="${IMAGE_BASE_URL}${article.image_url}" alt="${article.title}">` : 
+                    `<div class="article-icon">${getCategoryIcon(article.category)}</div>`
+                }
+            </div>
+            <div class="article-content">
+                <h3 class="article-title">${article.title}</h3>
+                <div class="article-meta">
+                    <span>Por: ${article.author_name || article.author}</span>
+                    <span>${formatDate(article.created_at || article.createdAt)}</span>
+                </div>
+                <div class="article-excerpt">${article.content.substring(0, 120)}...</div>
+                
+                <!-- ⭐⭐ SECCIÓN DE LIKES ⭐⭐ -->
+                <div class="like-section">
+                    <button class="like-btn" onclick="toggleLike(${articleId})" 
+                            title="Dar like a este artículo">
+                        🤍
+                    </button>
+                    <span class="like-count">0</span>
+                    <span class="like-text">likes</span>
+                </div>
+                
+                <div class="article-meta">
+                    <span class="article-status ${getCategoryClass(article.category)}">
+                        ${getCategoryName(article.category)}
+                    </span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Función para cargar y mostrar likes después de renderizar
+async function loadAndDisplayLikes(articleId) {
+    try {
+        const likeData = await loadArticleLikes(articleId);
+        await updateArticleLikes(articleId, likeData.likeCount, likeData.userLiked);
+    } catch (error) {
+        console.error('Error cargando likes:', error);
+    }
+}
 // ⭐⭐ AGREGAR ESTAS FUNCIONES AUXILIARES - NUEVAS ⭐⭐
 
 // FUNCIÓN PARA MOSTRAR COMENTARIO CON ANIMACIÓN
@@ -2884,8 +3497,13 @@ async function loadUsers() {
                 <td><span class="article-status ${user.active ? 'status-published' : 'status-rejected'}">${user.active ? 'Activo' : 'Inactivo'}</span></td>
                 <td>${formatDate(user.last_login || user.lastLogin)}</td>
                 <td class="action-buttons">
-                    <button class="${user.active ? 'btn-danger' : 'btn-success'}" onclick="toggleUserStatus(${user.id})">${user.active ? '🚫 Desactivar' : '✅ Activar'}</button>
-                    ${user.role !== 'admin' ? `<button onclick="resetUserPassword(${user.id})">🔑 Resetear Contraseña</button>` : ''}
+                    <button class="${user.active ? 'btn-danger' : 'btn-success'}" onclick="toggleUserStatus(${user.id})">
+                        ${user.active ? '🚫 Desactivar' : '✅ Activar'}
+                    </button>
+                    ${user.role !== 'admin' ? `
+                        <button onclick="resetUserPassword(${user.id})">🔑 Resetear</button>
+                        <button class="btn-danger" onclick="deleteUser(${user.id})" title="Eliminar usuario permanentemente">🗑️ Eliminar</button>
+                    ` : ''}
                 </td>
             </tr>
         `;
@@ -3715,6 +4333,8 @@ window.showPage = showPage;
 window.showGamesPage = showGamesPage;
 window.logout = logout;
 window.handleLogin = handleLogin;
+window.goToDashboard = goToDashboard;
+window.forceRefreshDashboard = forceRefreshDashboard;
 
 // Funciones para los juegos
 window.startSudokuGame = startSudokuGame;

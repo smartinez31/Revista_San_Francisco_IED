@@ -20,10 +20,12 @@
 
     <!-- Service Worker Registration Simplificado -->
     <!-- CORREGIR EN EL <head> DEL HTML -->
+<!-- Service Worker Registration Simplificado -->
 <script>
-    if ('serviceWorker' in navigator) {  // ✅ CORREGIDO: navigator
+    if ('serviceWorker' in navigator) {
         window.addEventListener('load', function() {
-            navigator.serviceWorker.register('.sw.js')  // ✅ CORREGIDO
+            // ⭐⭐ CORREGIR RUTA DEL SERVICE WORKER ⭐⭐
+            navigator.serviceWorker.register('./sw.js')  // ✅ Cambiado de '.sw.js' a './sw.js'
                 .then(function(registration) {
                     console.log('✅ ServiceWorker registrado: ', registration.scope);
                 })
@@ -32,17 +34,18 @@
                 });
         });
     }
-        // Verificar conexión
-        function updateOnlineStatus() {
-            const statusElement = document.getElementById('connection-status');
-            if (statusElement) {
-                statusElement.style.display = navigator.onLine ? 'none' : 'block';
-            }
+    
+    // Verificar conexión
+    function updateOnlineStatus() {
+        const statusElement = document.getElementById('connection-status');
+        if (statusElement) {
+            statusElement.style.display = navigator.onLine ? 'none' : 'block';
         }
-        window.addEventListener('online', updateOnlineStatus);
-        window.addEventListener('offline', updateOnlineStatus);
-        document.addEventListener('DOMContentLoaded', updateOnlineStatus);
-    </script>
+    }
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    document.addEventListener('DOMContentLoaded', updateOnlineStatus);
+</script>
 </head>
 <body>
     <!-- Header Público (visible para todos) -->
@@ -50,26 +53,25 @@
         <div class="container">
             <div class="header-content">
                 <div class="logo">
-                    <div class="school-logo">CSF</div>
-                    <div class="logo-text">
-                        <h1>Revista Digital</h1>
-                        <p>Colegio San Francisco IED - Programa Talentos</p>
-                    </div>
+                <div class="school-logo">CSF</div>
+                <div class="logo-text">
+                    <h1>Revista Digital</h1>
+                    <p>Colegio San Francisco IED - Programa Talentos</p>
                 </div>
-                <nav>
-                    <ul id="nav-menu">
-                        <li><a href="#" onclick="showPublicMagazine()">🏠</a></li>
-                        <li><a href="#" onclick="showPage('login-page')">🔐</a></li>
-                    </ul>
-                </nav>
-                <div class="user-info" id="user-info">
-                    <button onclick="showPublicMagazine()" class="btn-outline">👀 Ver Revista</button>
-                    <button onclick="showPage('login-page')">🔐 Ingresar</button>
+            </div>
+            <nav>
+                <ul id="nav-menu">
+                    <li><a href="#" onclick="showPublicMagazine()">🏠</a></li>
+                    <li><a href="#" onclick="showPage('login-page')">🔐</a></li>
+                </ul>
+            </nav>
+            <div class="user-info" id="user-info">
+                <button onclick="showPublicMagazine()" class="btn-outline">👀 Ver Revista</button>
+                <button onclick="showPage('login-page')">🔐 Ingresar</button>
                 </div>
             </div>
         </div>
     </header>
-
     <!-- Indicador de conexión -->
     <div id="connection-status" class="connection-status-offline" style="display: none;">
         🌐 Sin conexión - Modo offline activado
@@ -253,79 +255,81 @@
         </div>
 
         <!-- Dashboard Page -->
-        <div id="dashboard-page" class="page">
-            <div class="page-header">
-                <h2 class="page-title">Panel Principal</h2>
-                <div class="user-welcome">
-                    Bienvenido/a, <span id="welcome-user-name"></span>
-                    <button class="btn-help" onclick="showHelp('dashboard')">❓</button>
-                </div>
-            </div>
-            
-            <div class="dashboard-cards">
-                <div class="card card-published">
-                    <div class="card-icon">📊</div>
-                    <h3>Artículos Publicados</h3>
-                    <div class="number" id="published-count">0</div>
-                </div>
-                <div class="card card-pending">
-                    <div class="card-icon">⏳</div>
-                    <h3>Artículos Pendientes</h3>
-                    <div class="number" id="pending-count">0</div>
-                </div>
-                <div class="card card-comments">
-                    <div class="card-icon">💬</div>
-                    <h3>Comentarios</h3>
-                    <div class="number" id="comments-count">0</div>
-                </div>
-                <div class="card card-users">
-                    <div class="card-icon">👥</div>
-                    <h3>Usuarios Activos</h3>
-                    <div class="number" id="users-count">0</div>
-                </div>
-            </div>
-            
-            <div class="dashboard-section">
-                <h3>Notificaciones Recientes 
-                    <button class="btn-help" onclick="showHelp('notifications')">❓</button>
-                </h3>
-                <div id="notifications-list" class="notifications-container">
-                    <!-- Notifications will be populated by JavaScript -->
-                </div>
-            </div>
-
-            <div class="dashboard-section">
-                <h3>Acciones Rápidas 
-                    <button class="btn-help" onclick="showHelp('actions')">❓</button>
-                </h3>
-                <div class="quick-actions">
-                    <button class="btn-action" onclick="showNewArticleForm()">
-                        <span>📝</span>
-                        <span>Nuevo Artículo</span>
-                    </button>
-                    <button class="btn-action" onclick="showPage('articles-page'); loadArticles()">
-                        <span>📚</span>
-                        <span>Ver Artículos</span>
-                    </button>
-                    <button class="btn-action" onclick="showGamesPage()">
-                        <span>🎮</span>
-                        <span>Juegos Educativos</span>
-                    </button>
-                    <button class="btn-action" onclick="showPublicMagazine()">
-                        <span>👀</span>
-                        <span>Ver Revista Pública</span>
-                    </button>
-                    <button class="btn-action" onclick="showChangePasswordForm()">
-                        <span>🔒</span>
-                        <span>Cambiar Contraseña</span>
-                    </button>
-                    <button class="btn-action" onclick="exportData()" id="export-btn" style="display: none;">
-                        <span>📤</span>
-                        <span>Exportar Datos</span>
-                    </button>
-                </div>
-            </div>
+<div id="dashboard-page" class="page">
+    <div class="page-header">
+        <h2 class="page-title">Panel Principal</h2>
+        <div class="user-welcome">
+            Bienvenido/a, <span id="welcome-user-name"></span>
+            <button class="btn-help" onclick="showHelp('dashboard')">❓</button>
+            <!-- ⭐⭐ AGREGAR BOTÓN DE ACTUALIZACIÓN ⭐⭐ -->
+            <button class="btn-outline" onclick="forceRefreshDashboard()" title="Actualizar datos">🔄 Actualizar</button>
         </div>
+    </div>
+    
+    <div class="dashboard-cards">
+        <div class="card card-published">
+            <div class="card-icon">📊</div>
+            <h3>Artículos Publicados</h3>
+            <div class="number" id="published-count">0</div>
+        </div>
+        <div class="card card-pending">
+            <div class="card-icon">⏳</div>
+            <h3>Artículos Pendientes</h3>
+            <div class="number" id="pending-count">0</div>
+        </div>
+        <div class="card card-comments">
+            <div class="card-icon">💬</div>
+            <h3>Comentarios</h3>
+            <div class="number" id="comments-count">0</div>
+        </div>
+        <div class="card card-users">
+            <div class="card-icon">👥</div>
+            <h3>Usuarios Activos</h3>
+            <div class="number" id="users-count">0</div>
+        </div>
+    </div>
+    
+    <div class="dashboard-section">
+        <h3>Notificaciones Recientes 
+            <button class="btn-help" onclick="showHelp('notifications')">❓</button>
+        </h3>
+        <div id="notifications-list" class="notifications-container">
+            <!-- Notifications will be populated by JavaScript -->
+        </div>
+    </div>
+
+    <div class="dashboard-section">
+        <h3>Acciones Rápidas 
+            <button class="btn-help" onclick="showHelp('actions')">❓</button>
+        </h3>
+        <div class="quick-actions">
+            <button class="btn-action" onclick="showNewArticleForm()">
+                <span>📝</span>
+                <span>Nuevo Artículo</span>
+            </button>
+            <button class="btn-action" onclick="showPage('articles-page'); loadArticles()">
+                <span>📚</span>
+                <span>Ver Artículos</span>
+            </button>
+            <button class="btn-action" onclick="showGamesPage()">
+                <span>🎮</span>
+                <span>Juegos Educativos</span>
+            </button>
+            <button class="btn-action" onclick="showPublicMagazine()">
+                <span>👀</span>
+                <span>Ver Revista Pública</span>
+            </button>
+            <button class="btn-action" onclick="showChangePasswordForm()">
+                <span>🔒</span>
+                <span>Cambiar Contraseña</span>
+            </button>
+            <button class="btn-action" onclick="exportData()" id="export-btn" style="display: none;">
+                <span>📤</span>
+                <span>Exportar Datos</span>
+            </button>
+        </div>
+    </div>
+</div>
 
         <!-- Articles Page -->
         <div id="articles-page" class="page">

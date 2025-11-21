@@ -17,9 +17,11 @@ const allowedOrigins = [
     'https://revista-san-francisco-ied.onrender.com',
     'https://smartinez31.github.io',
     'http://localhost:5500',
-    'http://127.0.0.1:5500',
+    'http://127.0.0.1:5500',  // ⭐⭐ AGREGAR ESTE
     'http://localhost:3000',
-    'http://127.0.0.1:3000'
+    'http://127.0.0.1:3000',
+    'http://localhost:10000',  // ⭐⭐ AGREGAR ESTE TAMBIÉN
+    'http://127.0.0.1:10000'  // ⭐⭐ Y ESTE
 ];
 
 app.use(cors({
@@ -159,6 +161,29 @@ app.get('/api/debug-images', (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+// En server.js - AGREGAR ruta de debug de imágenes
+app.get('/api/debug/article-images', async (req, res) => {
+    try {
+        const result = await query(`
+            SELECT id, title, image_url 
+            FROM articles 
+            WHERE image_url IS NOT NULL
+            ORDER BY created_at DESC
+        `);
+        
+        console.log('🖼️ [DEBUG] Artículos con imágenes:', result.rows);
+        
+        res.json({
+            articles_with_images: result.rows,
+            image_base_url: IMAGE_BASE_URL,
+            public_images_path: path.join(__dirname, 'public', 'images')
+        });
+        
+    } catch (error) {
+        console.error('❌ Error en debug de imágenes:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
 // ==========================
 // MIDDLEWARE PARA HEADERS DE USUARIO
 // ==========================
@@ -256,20 +281,134 @@ app.post('/api/login', async (req, res) => {
     }
 });
 // ==========================
+// ELIMINAR USUARIOS (SOLO ADMIN)
+// ==========================
+app.delete('/api/users/:id', async (req, res) => {
+    try {
+        console.log('🗑️ [DELETE USER] Intentando eliminar usuario:', req.params.id);
+        
+        // Obtener el usuario que hace la solicitud desde el header
+        const userRole = req.headers['user-role'];
+        const userId = req.headers['user-id'];
+        
+        console.log('👤 [DELETE USER] Administrador solicitante:', { userId, userRole });
+        
+        // Verificar que solo administradores pueden eliminar usuarios
+        if (userRole !== 'admin') {
+            console.log('🚫 [DELETE USER] Usuario no autorizado para eliminar usuarios');
+            return res.status(403).json({ 
+                error: "No autorizado. Solo los administradores pueden eliminar usuarios." 
+            });
+        }
+
+        // ⭐⭐ EVITAR QUE EL ADMIN SE ELIMINE A SÍ MISMO ⭐⭐
+        if (parseInt(req.params.id) === parseInt(userId)) {
+            console.log('🚫 [DELETE USER] Intento de auto-eliminación bloqueado');
+            return res.status(400).json({ 
+                error: "No puedes eliminar tu propio usuario." 
+            });
+        }
+
+        // Verificar que el usuario existe
+        const userCheck = await query(
+            'SELECT id, username, name, role FROM users WHERE id = $1',
+            [req.params.id]
+        );
+
+        if (userCheck.rows.length === 0) {
+            console.log('❌ [DELETE USER] Usuario no encontrado');
+            return res.status(404).json({ error: "Usuario no encontrado" });
+        }
+
+        const userToDelete = userCheck.rows[0];
+        console.log('👤 [DELETE USER] Usuario a eliminar:', userToDelete);
+
+        // ⭐⭐ VERIFICAR QUE NO SEA EL ÚLTIMO ADMIN ⭐⭐
+        if (userToDelete.role === 'admin') {
+            const adminCount = await query(
+                'SELECT COUNT(*) FROM users WHERE role = $1 AND active = $2',
+                ['admin', true]
+            );
+            
+            const activeAdmins = parseInt(adminCount.rows[0].count);
+            if (activeAdmins <= 1) {
+                console.log('🚫 [DELETE USER] No se puede eliminar el último administrador activo');
+                return res.status(400).json({ 
+                    error: "No se puede eliminar el último administrador activo del sistema." 
+                });
+            }
+        }
+
+        // ⭐⭐ VERIFICAR QUE EL USUARIO NO TENGA ARTÍCULOS ASOCIADOS ⭐⭐
+        const userArticles = await query(
+            'SELECT COUNT(*) FROM articles WHERE author_id = $1',
+            [req.params.id]
+        );
+        
+        const articleCount = parseInt(userArticles.rows[0].count);
+        if (articleCount > 0) {
+            console.log(`📝 [DELETE USER] Usuario tiene ${articleCount} artículos asociados`);
+            return res.status(400).json({ 
+                error: `No se puede eliminar el usuario porque tiene ${articleCount} artículo(s) publicados. Primero elimine o transfiera los artículos.` 
+            });
+        }
+
+        // Eliminar el usuario
+        console.log('🗑️ [DELETE USER] Eliminando usuario de la base de datos...');
+        const result = await query(
+            'DELETE FROM users WHERE id = $1 RETURNING *',
+            [req.params.id]
+        );
+
+        console.log('✅ [DELETE USER] Usuario eliminado exitosamente');
+        res.json({ 
+            success: true, 
+            message: "Usuario eliminado exitosamente",
+            deletedUser: result.rows[0]
+        });
+
+    } catch (err) {
+        console.error('❌ [DELETE USER] Error eliminando usuario:', err.message);
+        
+        // Manejar error de clave foránea
+        if (err.message.includes('foreign key constraint')) {
+            return res.status(500).json({ 
+                error: "No se puede eliminar el usuario porque tiene datos asociados (artículos, comentarios, etc.)." 
+            });
+        }
+        
+        res.status(500).json({ 
+            error: "Error eliminando usuario: " + err.message 
+        });
+    }
+});
+// ==========================
 // ARTÍCULOS (VERSIÓN ÚNICA CORREGIDA)
 // ==========================
 // ✅ RUTA CORREGIDA PARA CREAR ARTÍCULOS CON IMÁGENES
+// ✅ MEJORAR RUTA DE CREAR ARTÍCULOS - VERIFICAR SESIÓN
 app.post('/api/articles', async (req, res) => {
     try {
         console.log('📥 [ARTICLES] Creando artículo...');
-        console.log('🖼️ [ARTICLES] ¿Tiene imagen?', !!req.body.image_base64);
         
-        const { title, category, chapter, content, author_id, status, image_base64 } = req.body;
+        // ⭐⭐ VERIFICAR AUTENTICACIÓN DESDE HEADERS ⭐⭐
+        const userRole = req.headers['user-role'];
+        const userId = req.headers['user-id'];
+        
+        console.log('👤 [ARTICLES] Usuario desde headers:', { userId, userRole });
+        
+        if (!userId || !userRole) {
+            return res.status(401).json({ 
+                error: "No autenticado. Por favor inicie sesión." 
+            });
+        }
+        
+        const { title, category, chapter, content, status, image_base64 } = req.body;
 
         // Validación básica
-        if (!title?.trim() || !content?.trim() || !author_id) {
+        if (!title?.trim() || !content?.trim()) {
             return res.status(400).json({ 
-                error: "Título, contenido y autor son requeridos" 
+                error: "Título y contenido son requeridos" 
             });
         }
 
@@ -289,7 +428,7 @@ app.post('/api/articles', async (req, res) => {
 
         const publishedAt = status === 'published' ? 'NOW()' : 'NULL';
         
-        // ✅ QUERY CORREGIDA - Usar parámetros correctamente
+        // ✅ QUERY CORREGIDA - Usar el userId de los headers
         const queryText = `
             INSERT INTO articles (title, category, chapter, content, author_id, status, image_url, published_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, ${publishedAt})
@@ -301,18 +440,13 @@ app.post('/api/articles', async (req, res) => {
             category,
             chapter,
             content.trim(),
-            parseInt(author_id),
+            parseInt(userId), // ⭐⭐ USAR userId DE LOS HEADERS
             statusValue,
-            image_url  // Puede ser null si no hay imagen
+            image_url
         ]);
 
-        console.log('✅ [ARTICLES] Artículo creado exitosamente:', {
-            id: result.rows[0].id,
-            title: result.rows[0].title,
-            hasImage: !!result.rows[0].image_url,
-            imageUrl: result.rows[0].image_url
-        });
-
+        console.log('✅ [ARTICLES] Artículo creado exitosamente por usuario:', userId);
+        
         res.json({ 
             success: true, 
             article: result.rows[0],
@@ -321,7 +455,6 @@ app.post('/api/articles', async (req, res) => {
 
     } catch (err) {
         console.error("❌ [ARTICLES] Error creando artículo:", err.message);
-        console.error("❌ [ARTICLES] Stack:", err.stack);
         res.status(500).json({ 
             error: "Error creando artículo: " + err.message 
         });
@@ -333,8 +466,10 @@ app.get('/api/articles', async (req, res) => {
         console.log('📚 [ARTICLES DEBUG] Solicitando todos los artículos...');
         
         const result = await query(`
-            SELECT a.*, u.name AS author_name
-            FROM articles a LEFT JOIN users u ON a.author_id = u.id
+            SELECT a.*, 
+                   COALESCE(u.name, 'Autor Desconocido') AS author_name  -- ⭐⭐ CORRECCIÓN AQUÍ
+            FROM articles a 
+            LEFT JOIN users u ON a.author_id = u.id
             ORDER BY a.created_at DESC
         `);
         
@@ -344,7 +479,7 @@ app.get('/api/articles', async (req, res) => {
                 id: a.id, 
                 title: a.title.substring(0, 30) + '...', 
                 status: a.status,
-                author: a.author_name 
+                author: a.author_name  -- //⭐⭐ Ahora siempre tendrá un valor
             }))
         );
         
@@ -457,30 +592,184 @@ app.put('/api/articles/:id/reject', async (req, res) => {
         });
     }
 });
+
+// ==========================
+// SISTEMA DE LIKES
+// ==========================
+
+// Obtener likes de un artículo
+// En server.js - CORREGIR la ruta de likes
+app.get('/api/articles/:id/likes', async (req, res) => {
+    try {
+        const userId = req.query.user_id;
+        
+        // ⭐⭐ CORRECCIÓN: Convertir string 'null' a NULL real
+        let userIdParam = null;
+        if (userId && userId !== 'null' && userId !== 'undefined') {
+            userIdParam = parseInt(userId);
+        }
+
+        const result = await query(`
+            SELECT COUNT(*) as like_count,
+                   CASE 
+                       WHEN $2::integer IS NULL THEN false
+                       ELSE EXISTS(
+                           SELECT 1 FROM article_likes 
+                           WHERE article_id = $1 AND user_id = $2
+                       )
+                   END as user_liked
+            FROM article_likes 
+            WHERE article_id = $1
+        `, [req.params.id, userIdParam]);
+
+        res.json({
+            success: true,
+            likeCount: parseInt(result.rows[0].like_count),
+            userLiked: result.rows[0].user_liked
+        });
+    } catch (err) {
+        console.error('❌ Error obteniendo likes:', err);
+        res.status(500).json({ error: "Error obteniendo likes" });
+    }
+});
+
+// Dar like/quit like a un artículo
+// En server.js - CORREGIR también la ruta POST de likes
+app.post('/api/articles/:id/like', async (req, res) => {
+    try {
+        const { user_id, user_ip, user_agent } = req.body;
+        const articleId = req.params.id;
+
+        console.log('❤️ [LIKE] Solicitando like para artículo:', articleId, { user_id, user_ip });
+
+        // ⭐⭐ CORRECCIÓN: Convertir user_id si es string 'null'
+        let userIdParam = null;
+        if (user_id && user_id !== 'null' && user_id !== 'undefined') {
+            userIdParam = parseInt(user_id);
+        }
+
+        // Verificar que el artículo existe
+        const articleCheck = await query('SELECT id FROM articles WHERE id = $1', [articleId]);
+        if (articleCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Artículo no encontrado" });
+        }
+
+        // Verificar si ya dio like
+        let likeCheckQuery = 'SELECT id FROM article_likes WHERE article_id = $1';
+        let likeCheckParams = [articleId];
+
+        if (userIdParam) {
+            likeCheckQuery += ' AND user_id = $2';
+            likeCheckParams.push(userIdParam);
+        } else if (user_ip) {
+            likeCheckQuery += ' AND user_ip = $2';
+            likeCheckParams.push(user_ip);
+        }
+
+        const likeCheck = await query(likeCheckQuery, likeCheckParams);
+
+        if (likeCheck.rows.length > 0) {
+            // Quitar like (unlike)
+            await query('DELETE FROM article_likes WHERE id = $1', [likeCheck.rows[0].id]);
+            console.log('💔 [LIKE] Like removido');
+            
+            // Obtener nuevo conteo
+            const newCount = await query('SELECT COUNT(*) FROM article_likes WHERE article_id = $1', [articleId]);
+            
+            res.json({
+                success: true,
+                liked: false,
+                likeCount: parseInt(newCount.rows[0].count),
+                message: "Like removido"
+            });
+        } else {
+            // Dar like
+            await query(`
+                INSERT INTO article_likes (article_id, user_id, user_ip, user_agent) 
+                VALUES ($1, $2, $3, $4)
+            `, [articleId, userIdParam, user_ip || null, user_agent || null]);
+            
+            console.log('❤️ [LIKE] Like agregado');
+            
+            // Obtener nuevo conteo
+            const newCount = await query('SELECT COUNT(*) FROM article_likes WHERE article_id = $1', [articleId]);
+            
+            res.json({
+                success: true,
+                liked: true,
+                likeCount: parseInt(newCount.rows[0].count),
+                message: "Like agregado"
+            });
+        }
+
+    } catch (err) {
+        console.error('❌ Error gestionando like:', err);
+        res.status(500).json({ error: "Error gestionando like" });
+    }
+});
+// Obtener artículos más populares (por likes)
+app.get('/api/articles/popular', async (req, res) => {
+    try {
+        const result = await query(`
+            SELECT a.*, u.name as author_name, COUNT(al.id) as like_count
+            FROM articles a 
+            LEFT JOIN users u ON a.author_id = u.id
+            LEFT JOIN article_likes al ON a.id = al.article_id
+            WHERE a.status = 'published'
+            GROUP BY a.id, u.name
+            ORDER BY like_count DESC, a.published_at DESC
+            LIMIT 10
+        `);
+
+        res.json({
+            success: true,
+            articles: result.rows
+        });
+    } catch (err) {
+        console.error('❌ Error obteniendo artículos populares:', err);
+        res.status(500).json({ error: "Error obteniendo artículos populares" });
+    }
+});
 // ==========================
 // NOTIFICACIONES
 // ==========================
 
 // Obtener notificaciones del usuario
+// ⭐⭐ DEBUG: Verificar notificaciones en la BD ⭐⭐
+// En server.js - CORREGIR la ruta de notificaciones
 app.get('/api/notifications', async (req, res) => {
     try {
         const userId = req.query.user_id;
         
+        console.log('🔔 [NOTIFICATIONS] Solicitando notificaciones para usuario:', userId);
+        
         if (!userId) {
-            return res.status(400).json({ error: "user_id es requerido" });
+            return res.status(400).json({ 
+                success: false, 
+                error: "user_id es requerido" 
+            });
         }
 
         const result = await query(`
             SELECT * FROM notifications 
             WHERE user_id = $1 
             ORDER BY created_at DESC
-            LIMIT 50
+            LIMIT 20
         `, [userId]);
 
-        res.json({ success: true, notifications: result.rows });
+        console.log('✅ [NOTIFICATIONS] Notificaciones encontradas:', result.rows.length);
+        
+        res.json({ 
+            success: true, 
+            notifications: result.rows 
+        });
+        
     } catch (err) {
         console.error('❌ Error obteniendo notificaciones:', err);
-        res.status(500).json({ error: "Error obteniendo notificaciones" });
+        res.status(500).json({ 
+            success: false, 
+            error: "Error obteniendo notificaciones: " + err.message 
+        });
     }
 });
 
@@ -630,11 +919,74 @@ app.post('/api/articles/:id/comments', async (req, res) => {
         res.status(500).json({ error: "Error agregando comentario" });
     }
 });
+// ==========================
+// ELIMINAR COMENTARIOS (SOLO ADMIN Y DOCENTE)
+// ==========================
+app.delete('/api/comments/:id', async (req, res) => {
+    try {
+        console.log('🗑️ [DELETE COMMENT] Intentando eliminar comentario:', req.params.id);
+        
+        // Obtener el usuario que hace la solicitud desde el header
+        const userRole = req.headers['user-role'];
+        const userId = req.headers['user-id'];
+        
+        console.log('👤 [DELETE COMMENT] Usuario solicitante:', { userId, userRole });
+        
+        // Verificar que solo administradores y docentes pueden eliminar comentarios
+        if (userRole !== 'admin' && userRole !== 'teacher') {
+            console.log('🚫 [DELETE COMMENT] Usuario no autorizado para eliminar comentarios');
+            return res.status(403).json({ 
+                error: "No autorizado. Solo administradores y docentes pueden eliminar comentarios." 
+            });
+        }
 
+        // Verificar que el comentario existe
+        const commentCheck = await query(
+            `SELECT c.*, a.author_id as article_author_id 
+             FROM comments c 
+             JOIN articles a ON c.article_id = a.id 
+             WHERE c.id = $1`,
+            [req.params.id]
+        );
+
+        if (commentCheck.rows.length === 0) {
+            console.log('❌ [DELETE COMMENT] Comentario no encontrado');
+            return res.status(404).json({ error: "Comentario no encontrado" });
+        }
+
+        const comment = commentCheck.rows[0];
+        console.log('💬 [DELETE COMMENT] Comentario a eliminar:', {
+            id: comment.id,
+            author: comment.author_id,
+            content: comment.content.substring(0, 50) + '...'
+        });
+
+        // Eliminar el comentario
+        console.log('🗑️ [DELETE COMMENT] Eliminando comentario de la base de datos...');
+        const result = await query(
+            'DELETE FROM comments WHERE id = $1 RETURNING *',
+            [req.params.id]
+        );
+
+        console.log('✅ [DELETE COMMENT] Comentario eliminado exitosamente');
+        res.json({ 
+            success: true, 
+            message: "Comentario eliminado exitosamente",
+            deletedComment: result.rows[0]
+        });
+
+    } catch (err) {
+        console.error('❌ [DELETE COMMENT] Error eliminando comentario:', err.message);
+        res.status(500).json({ 
+            error: "Error eliminando comentario: " + err.message 
+        });
+    }
+});
 // OBTENER COMENTARIOS DE UN ARTÍCULO
+// ⭐⭐ VERIFICAR RUTA DE COMENTARIOS EN server.js ⭐⭐
 app.get('/api/articles/:id/comments', async (req, res) => {
     try {
-        console.log('💬 [COMMENTS] Obteniendo comentarios para artículo:', req.params.id);
+        console.log('💬 [API] Obteniendo comentarios para artículo:', req.params.id);
         
         const result = await query(`
             SELECT c.*, u.name as author_name 
@@ -644,12 +996,17 @@ app.get('/api/articles/:id/comments', async (req, res) => {
             ORDER BY c.created_at DESC
         `, [req.params.id]);
 
-        console.log('📊 [COMMENTS] Comentarios encontrados:', result.rows.length);
-        res.json({ success: true, comments: result.rows });
+        console.log('📊 [API] Comentarios encontrados en BD:', result.rows.length);
+        res.json({ 
+            success: true, 
+            comments: result.rows 
+        });
 
     } catch (err) {
         console.error('❌ Error obteniendo comentarios:', err);
-        res.status(500).json({ error: "Error obteniendo comentarios" });
+        res.status(500).json({ 
+            error: "Error obteniendo comentarios" 
+        });
     }
 });
 

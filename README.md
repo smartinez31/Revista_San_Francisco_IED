@@ -33,4 +33,4 @@ cp .env.example .env
 # Editar .env con tus configuraciones
 
 # Iniciar servidor
-npm run dev
+npm start
